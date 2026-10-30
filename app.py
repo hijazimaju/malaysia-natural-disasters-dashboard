@@ -33,7 +33,7 @@ TYPE_LABEL = {
 }
 ALERT_COLOR = {"Red": "#d62728", "Orange": "#ff7f0e", "Green": "#2ca02c"}
 
-st.set_page_config(page_title="Bencana Alam Malaysia — Live", layout="wide")
+st.set_page_config(page_title="World Natural Disaster Dashboard", layout="wide")
 
 # Auto-refresh seluruh app; data di-cache 10 minit (ttl) supaya API tidak dibelasah.
 st_autorefresh(interval=REFRESH_MS, key="live_refresh")
@@ -190,7 +190,7 @@ def fetch_news() -> pd.DataFrame:
 
 
 # ================= HEADER =================
-st.title("🇲🇾 Bencana Alam Malaysia — Papan Pemuka Live")
+st.title("🌍 WORLD NATURAL DISASTER DASHBOARD")
 tab_live, tab_sejarah = st.tabs(["🔴 Live Sekarang", "📚 Sejarah 2000–2025 (EM-DAT)"])
 
 # ================= TAB LIVE =================
