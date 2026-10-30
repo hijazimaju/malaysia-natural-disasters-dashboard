@@ -15,6 +15,7 @@ Jalankan: ./run.sh
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 import pandas as pd
 import plotly.express as px
@@ -153,6 +154,52 @@ def fetch_ifrc() -> pd.DataFrame:
             }
         )
     df = pd.DataFrame(rows)
+    df.attrs["fetched_at"] = _now_my()
+    return df
+
+
+@st.cache_data(ttl=3600)
+def fetch_aha() -> pd.DataFrame:
+    """Flash update AHA Centre (ASEAN) berkaitan Malaysia + weekly update terkini."""
+    import html as _html
+    months = {"january": 1, "february": 2, "march": 3, "april": 4, "may": 5,
+              "june": 6, "july": 7, "august": 8, "september": 9, "october": 10,
+              "november": 11, "december": 12, "jan": 1, "feb": 2, "mar": 3,
+              "apr": 4, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10,
+              "nov": 11, "dec": 12}
+    rows, seen = [], set()
+    for q in ["Malaysia", "Peninsular Malaysia"]:
+        d = requests.get(
+            "https://ahacentre.org/wp-json/wp/v2/search",
+            params={"search": q, "per_page": 30}, timeout=20,
+        ).json()
+        for r in d:
+            t = _html.unescape(r.get("title", ""))
+            url = r.get("url", "")
+            if url in seen or "/flash-update/" not in url:
+                continue
+            if "malaysia" not in t.lower() and "peninsular" not in t.lower():
+                continue
+            m = re.search(
+                r"(\d{1,2})-(january|february|march|april|may|june|july|august|"
+                r"september|october|november|december|jan|feb|mar|apr|jun|jul|"
+                r"aug|sep|oct|nov|dec)-(\d{4})/?$", url)
+            dt = f"{m.group(1)} {m.group(2)[:3].title()} {m.group(3)}" if m else "-"
+            seen.add(url)
+            rows.append({"tajuk": t, "tarikh": dt, "url": url,
+                         "tahun": int(m.group(3)) if m else 0})
+    df = pd.DataFrame(rows).sort_values("tahun", ascending=False).reset_index(drop=True)
+    # Weekly Disaster Update terkini
+    try:
+        w = requests.get(
+            "https://ahacentre.org/wp-json/wp/v2/search",
+            params={"search": "WEEKLY DISASTER UPDATE", "per_page": 1}, timeout=20,
+        ).json()
+        df.attrs["weekly_title"] = _html.unescape(w[0].get("title", "")) if w else ""
+        df.attrs["weekly_url"] = w[0].get("url", "") if w else ""
+    except Exception:
+        df.attrs["weekly_title"] = ""
+        df.attrs["weekly_url"] = ""
     df.attrs["fetched_at"] = _now_my()
     return df
 
@@ -379,6 +426,57 @@ with tab_live:
         st.info("Tiada operasi IFRC direkodkan buat masa ini.")
     else:
         st.warning(f"Data IFRC gagal dimuatkan: {ifrc_err}. Paparan lain tidak terjejas.")
+
+    # --- Agensi meteorologi & pengurusan bencana ---
+    st.divider()
+    st.subheader("🏛️ Agensi meteorologi & pengurusan bencana")
+    st.caption(
+        "Pautan terus ke badan rasmi. Nota jujur: kebanyakan banjir Malaysia "
+        "berskala tempatan dan tidak melepasi ambang amaran global GDACS — "
+        "sebab itu ia tidak muncul dalam peta GDACS di atas. Maklumat banjir "
+        "Malaysia yang terperinci ada dalam Flash Update AHA Centre dan "
+        "seksyen Berita di bawah."
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**🇲🇾 Malaysia**")
+        st.link_button("MET Malaysia — Amaran cuaca", "https://www.met.gov.my/")
+        st.link_button("NADMA — Portal Bencana", "https://portalbencana.nadma.gov.my/")
+        st.link_button("JPS — InfoBanjir (aras sungai)", "https://infobanjir.water.gov.my/")
+        st.link_button("data.gov.my — Data terbuka", "https://data.gov.my/")
+    with c2:
+        st.markdown("**🌐 Antarabangsa**")
+        st.link_button("AHA Centre (ASEAN)", "https://ahacentre.org/")
+        st.link_button("WMO — Pertubuhan Meteorologi Sedunia", "https://wmo.int/")
+        st.link_button("UNDRR — Pengurangan Risiko Bencana PBB", "https://www.undrr.org/")
+        st.link_button("Copernicus EMS (EU)", "https://emergency.copernicus.eu/")
+
+    st.markdown("**🟧 AHA Centre — Flash Update berkaitan Malaysia**")
+    try:
+        aha = fetch_aha()
+        aha_ok = True
+    except Exception as e:
+        aha_ok = False
+        aha_err = e
+    if aha_ok and not aha.empty:
+        st.caption(
+            f"Ditarik pada {aha.attrs['fetched_at'].strftime('%d %b %Y, %H:%M')} — "
+            "Pusat Penyelarasan ASEAN untuk Bantuan Kemanusiaan (AHA Centre)."
+        )
+        st.dataframe(
+            aha[["tarikh", "tajuk", "url"]].rename(columns={
+                "tarikh": "Tarikh", "tajuk": "Tajuk", "url": "Pautan",
+            }),
+            use_container_width=True, hide_index=True,
+            column_config={"Pautan": st.column_config.LinkColumn()},
+        )
+        if aha.attrs.get("weekly_url"):
+            st.link_button(f"📅 {aha.attrs['weekly_title']}",
+                           aha.attrs["weekly_url"])
+    elif aha_ok:
+        st.info("Tiada Flash Update AHA berkaitan Malaysia buat masa ini.")
+    else:
+        st.warning(f"Data AHA gagal dimuatkan: {aha_err}. Paparan lain tidak terjejas.")
 
     # --- Gempa USGS ---
     st.divider()
