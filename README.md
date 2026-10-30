@@ -1,51 +1,52 @@
-# Malaysia Natural Disasters Dashboard
+# Bencana Alam Malaysia — Papan Pemuka Live 🇲🇾
 
-Self-contained Streamlit dashboard of natural disasters in Malaysia, built from
-real EM-DAT data (no fabricated values).
+Papan pemuka Streamlit dwibahasa (BM) yang menggabungkan data bencana **semasa
+(live)** dan **sejarah**. Tiada data direka — semua angka dari sumber sebenar.
 
-## Data
+## Tab 🔴 Live Sekarang (auto-refresh setiap 10 minit)
 
-`malaysia_natural_disasters.csv` — 43 records, 2000–2025, one row per
-(year, disaster subtype).
+- **GDACS** (PBB/OCHA & EC-JRC) — peristiwa bencana aktif seluruh dunia:
+  KPI (aktif, melibatkan Malaysia, amaran merah), peta dunia interaktif
+  berwarna ikut tahap amaran, jadual 25 peristiwa terkini, dan senarai khas
+  peristiwa yang melibatkan Malaysia dengan pautan laporan GDACS.
+- **USGS** — gempa bumi M4+ dalam 30 hari di sekitar Malaysia
+  (9°S–8°N, 99°E–106°E, termasuk Sumatera): KPI, peta episenter (saiz ikut
+  magnitud), jadual 15 gempa terkini dengan pautan USGS.
+- **Peta Malaysia** — titik peristiwa GDACS yang melibatkan Malaysia dan
+  gempa USGS, di atas peta OpenStreetMap berpusat di Malaysia.
+- **Berita terkini** — agregat Google News RSS (30 hari) dari outlet berlesen
+  (Bernama, Astro Awani, The Star, Berita Harian, Utusan, Sinar Harian,
+  Harian Metro dll.): tajuk berpaut, sumber dan masa, dikemas kini setiap
+  30 minit. Sumber media sosial ditapis keluar.
 
-- **Source:** EM-DAT – The International Disasters Database (CRED, UCLouvain),
-  country profiles via the Humanitarian Data Exchange
-- **Dataset updated:** 2026-10-28
-- **Schema:** `year, country, iso, disaster_subgroup, disaster_type,
-  disaster_subtype, events, affected, deaths, damage_usd_original,
-  damage_usd_adjusted`
-- **Missing data:** `affected` (2 rows), `deaths` (14 rows), damage columns
-  (31 rows each) are blank where EM-DAT has no figure — blanks are *not* zero.
+## Tab 📚 Sejarah 2000–2025 (EM-DAT)
 
-### Data pitfalls
+`malaysia_natural_disasters.csv` — 43 rekod, satu baris setiap
+(tahun, subjenis bencana). Penapis sidebar (julat tahun, jenis, metrik),
+KPI, carta trend dan jadual detail.
 
-- EM-DAT only records disasters meeting its threshold (≥10 deaths, ≥100
-  affected, declared emergency, or international appeal). Small everyday floods
-  are not included.
-- The long-term upward trend largely reflects better reporting, not necessarily
-  more disasters.
-- 2025 data is partial (year in progress at last update).
+- **Sumber:** EM-DAT (CRED/UCLouvain) via Humanitarian Data Exchange,
+  dikemas kini 2026-10-28.
 
-## Run
+## Had data (penting)
+
+- GDACS: tahap amaran ialah anggaran impak automatik, bukan angka rasmi;
+  tarikh banjir kadangkala tarikh ramalan model.
+- USGS: kebanyakan gempa dalam bbox ini berpusat di Sumatera — gegaran
+  dirasai di Malaysia, bukan gempa "di Malaysia".
+- EM-DAT: hanya bencana melepasi ambang (≥10 kematian / ≥100 terjejas /
+  darurat); trend menaik sebahagiannya kesan liputan laporan yang makin baik;
+  sel kosong = tiada data, bukan sifar; 2025 separa.
+
+## Jalankan
 
 ```bash
 ./run.sh
 ```
 
-Then open http://localhost:8501. `run.sh` creates `.venv` and installs pinned
-dependencies from `requirements.txt` on first run.
+buka http://localhost:8501.
 
-Manual equivalent:
+## Deploy
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/streamlit run app.py
-```
-
-## Features
-
-- Sidebar filters: year range, disaster type, trend metric
-- KPI row: events, people affected, deaths, inflation-adjusted damage
-- Plotly trend chart (stacked by disaster type)
-- Detail table with missing values shown as —
+App ini di-deploy di Streamlit Community Cloud dari repo ini (branch `main`,
+fail `app.py`). Setiap push ke `main` trigger redeploy automatik.
