@@ -38,6 +38,20 @@ ALERT_COLOR = {"Red": "#d62728", "Orange": "#ff7f0e", "Green": "#2ca02c"}
 
 st.set_page_config(page_title="World Natural Disaster Dashboard", layout="wide")
 
+# CSS mesra telefon: padding lebih ketat & tajuk lebih kecil pada skrin sempit.
+st.markdown(
+    """<style>
+@media (max-width: 768px) {
+  .block-container { padding: 1rem 0.75rem !important; }
+  h1 { font-size: 1.5rem !important; line-height: 1.25 !important; }
+  h2 { font-size: 1.2rem !important; }
+  h3 { font-size: 1.05rem !important; }
+  .stMetric { padding: 0.25rem 0 !important; }
+}
+</style>""",
+    unsafe_allow_html=True,
+)
+
 # Auto-refresh seluruh app; data di-cache 10 minit (ttl) supaya API tidak dibelasah.
 st_autorefresh(interval=REFRESH_MS, key="live_refresh")
 
