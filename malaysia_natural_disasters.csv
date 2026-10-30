@@ -1,0 +1,44 @@
+year,country,iso,disaster_subgroup,disaster_type,disaster_subtype,events,affected,deaths,damage_usd_original,damage_usd_adjusted
+2000,Malaysia,MYS,Hydrological,Flood,Flash flood,1,8000,12,1000000,1869587
+2000,Malaysia,MYS,Meteorological,Storm,Storm (General),1,500,,,
+2001,Malaysia,MYS,Hydrological,Flood,Flash flood,1,10000,,,
+2001,Malaysia,MYS,Hydrological,Flood,Flood (General),2,5200,,,
+2001,Malaysia,MYS,Hydrological,Flood,Riverine flood,1,18000,11,,
+2002,Malaysia,MYS,Hydrological,Mass movement (wet),Landslide (wet),1,,10,,
+2002,Malaysia,MYS,Meteorological,Storm,Lightning/Thunderstorms,1,155,2,,
+2003,Malaysia,MYS,Hydrological,Flood,Flash flood,1,3000,5,,
+2003,Malaysia,MYS,Hydrological,Flood,Riverine flood,2,15800,3,,
+2004,Malaysia,MYS,Geophysical,Earthquake,Tsunami,1,5063,80,500000000,852227076
+2004,Malaysia,MYS,Hydrological,Flood,Riverine flood,3,31038,16,10000000,17044542
+2004,Malaysia,MYS,Meteorological,Storm,Storm (General),2,41000,1,,
+2005,Malaysia,MYS,Hydrological,Flood,Flash flood,2,30600,13,,
+2005,Malaysia,MYS,Climatological,Wildfire,Forest fire,1,,,,
+2006,Malaysia,MYS,Hydrological,Flood,Flash flood,1,100000,6,22000000,35134119
+2006,Malaysia,MYS,Hydrological,Flood,Riverine flood,3,6518,,,
+2007,Malaysia,MYS,Hydrological,Flood,Riverine flood,2,166533,46,968000000,1503024751
+2008,Malaysia,MYS,Hydrological,Flood,Flash flood,1,6000,,,
+2008,Malaysia,MYS,Hydrological,Flood,Riverine flood,1,2000,,,
+2009,Malaysia,MYS,Hydrological,Flood,Riverine flood,2,10875,,,
+2011,Malaysia,MYS,Hydrological,Flood,Riverine flood,1,20000,2,,
+2011,Malaysia,MYS,Hydrological,Mass movement (wet),Landslide (wet),1,6,16,,
+2013,Malaysia,MYS,Hydrological,Flood,Riverine flood,1,75000,4,2000000,2763968
+2014,Malaysia,MYS,Climatological,Drought,Drought,1,2200000,,,
+2014,Malaysia,MYS,Hydrological,Flood,Riverine flood,1,230000,17,284000000,386218122
+2015,Malaysia,MYS,Geophysical,Earthquake,Ground movement,1,10,24,2000,2717
+2015,Malaysia,MYS,Hydrological,Flood,Riverine flood,1,3000,1,,
+2016,Malaysia,MYS,Hydrological,Flood,Flood (General),4,31841,,132000000,177063317
+2017,Malaysia,MYS,Hydrological,Flood,Flood (General),2,8981,7,,
+2017,Malaysia,MYS,Hydrological,Flood,Riverine flood,1,13000,2,,
+2017,Malaysia,MYS,Meteorological,Storm,Storm (General),1,426,,,
+2018,Malaysia,MYS,Hydrological,Flood,Flash flood,1,4900,,,
+2018,Malaysia,MYS,Hydrological,Flood,Flood (General),1,12000,2,,
+2019,Malaysia,MYS,Hydrological,Flood,Flood (General),4,22477,2,,
+2020,Malaysia,MYS,Hydrological,Flood,Flood (General),4,12610,,6800000,8458723
+2020,Malaysia,MYS,Hydrological,Flood,Riverine flood,1,9273,,,
+2021,Malaysia,MYS,Hydrological,Flood,Flash flood,3,125828,63,1460000000,1734646947
+2021,Malaysia,MYS,Hydrological,Flood,Flood (General),5,38813,16,,
+2022,Malaysia,MYS,Hydrological,Flood,Flood (General),5,90625,17,240000,264019
+2022,Malaysia,MYS,Hydrological,Mass movement (wet),Landslide (wet),1,94,33,,
+2023,Malaysia,MYS,Hydrological,Flood,Flood (General),4,84187,6,,
+2025,Malaysia,MYS,Hydrological,Flood,Flash flood,2,21834,16,,
+2025,Malaysia,MYS,Hydrological,Flood,Flood (General),5,30480,5,,
