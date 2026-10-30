@@ -2,12 +2,14 @@
 
 Gabungan:
 - LIVE: peristiwa semasa GDACS (global, dikemas kini berterusan) + gempa bumi
-  terkini USGS berhampiran Malaysia. Auto-refresh setiap 10 minit.
+  terkini USGS berhampiran Malaysia + operasi kecemasan IFRC.
+  Auto-refresh setiap 10 minit.
 - SEJARAH: data EM-DAT 2000–2025 (CSV statik dalam repo).
 
 Sumber live:
 - GDACS (UN/OCHA & EC JRC): https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH
 - USGS Earthquake Hazards Program: https://earthquake.usgs.gov/fdsnws/event/1/
+- IFRC GO (Persekutuan Antarabangsa Palang Merah): https://goadmin.ifrc.org/api/v2/event/
 Jalankan: ./run.sh
 """
 
@@ -118,6 +120,39 @@ def fetch_usgs() -> pd.DataFrame:
             }
         )
     df = pd.DataFrame(rows).sort_values("masa", ascending=False).reset_index(drop=True)
+    df.attrs["fetched_at"] = _now_my()
+    return df
+
+
+@st.cache_data(ttl=1800)
+def fetch_ifrc() -> pd.DataFrame:
+    """Operasi kecemasan terkini IFRC (dunia) — Persekutuan Antarabangsa
+    Palang Merah & Bulan Sabit Merah."""
+    r = requests.get(
+        "https://goadmin.ifrc.org/api/v2/event/",
+        params={"ordering": "-created_at", "limit": 150},
+        timeout=25,
+    )
+    r.raise_for_status()
+    rows = []
+    for ev in r.json().get("results", []):
+        countries = ev.get("countries") or []
+        isos = [str(c.get("iso") or "") for c in countries]
+        cnames = ", ".join(c.get("name") or "" for c in countries) or "-"
+        rows.append(
+            {
+                "tarikh": (ev.get("disaster_start_date") or ev.get("created_at") or "")[:10],
+                "peristiwa": ev.get("name") or "-",
+                "jenis": (ev.get("dtype") or {}).get("name") or "-",
+                "negara": cnames,
+                "tahap": ev.get("ifrc_severity_level_display") or "-",
+                "terjejas": ev.get("num_affected"),
+                "url": f"https://go.ifrc.org/emergencies/{ev.get('id')}",
+                "melibatkan_my": any(i in ("MYS", "MY") for i in isos)
+                or "malaysia" in (ev.get("name") or "").lower(),
+            }
+        )
+    df = pd.DataFrame(rows)
     df.attrs["fetched_at"] = _now_my()
     return df
 
@@ -306,6 +341,44 @@ with tab_live:
                        "melibatkan Malaysia; biru = gempa USGS 30 hari.")
         elif gdacs_ok:
             st.info("Tiada titik peristiwa melibatkan Malaysia buat masa ini.")
+
+    # --- IFRC: operasi kecemasan antarabangsa ---
+    st.divider()
+    st.subheader("🟥 IFRC — Operasi kecemasan antarabangsa terkini")
+    try:
+        ifrc = fetch_ifrc()
+        ifrc_ok = True
+    except Exception as e:
+        ifrc_ok = False
+        ifrc_err = e
+    if ifrc_ok and not ifrc.empty:
+        st.caption(
+            f"Ditarik pada {ifrc.attrs['fetched_at'].strftime('%d %b %Y, %H:%M')} — "
+            "Persekutuan Antarabangsa Palang Merah & Bulan Sabit Merah (IFRC), "
+            "operasi kecemasan & rayuan bantuan terkini di seluruh dunia."
+        )
+        st.dataframe(
+            ifrc.head(15)[["tarikh", "peristiwa", "jenis", "negara", "tahap"]].rename(columns={
+                "tarikh": "Tarikh", "peristiwa": "Operasi", "jenis": "Jenis",
+                "negara": "Negara", "tahap": "Tahap",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+        ifrc_my = ifrc[ifrc["melibatkan_my"]]
+        if not ifrc_my.empty:
+            st.subheader("⚠️ Operasi IFRC melibatkan Malaysia")
+            st.dataframe(
+                ifrc_my[["tarikh", "peristiwa", "jenis", "tahap", "url"]].rename(columns={
+                    "tarikh": "Tarikh", "peristiwa": "Operasi", "jenis": "Jenis",
+                    "tahap": "Tahap", "url": "Pautan IFRC GO",
+                }),
+                use_container_width=True, hide_index=True,
+                column_config={"Pautan IFRC GO": st.column_config.LinkColumn()},
+            )
+    elif ifrc_ok:
+        st.info("Tiada operasi IFRC direkodkan buat masa ini.")
+    else:
+        st.warning(f"Data IFRC gagal dimuatkan: {ifrc_err}. Paparan lain tidak terjejas.")
 
     # --- Gempa USGS ---
     st.divider()
