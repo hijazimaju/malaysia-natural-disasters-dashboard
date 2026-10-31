@@ -15,6 +15,7 @@ Jalankan: ./run.sh
 
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 import re
 
 import pandas as pd
@@ -485,15 +486,69 @@ with tab_live:
     else:
         st.info("Tiada berita dapat ditarik buat masa ini.")
 
-    # --- Pembantu AI (jawab dari data live dashboard) ---
+    # --- Pembantu AI (Google Gemini; fallback mod asas tanpa kunci API) ---
     st.divider()
     st.subheader("🤖 Pembantu AI — tanya tentang bencana di Malaysia")
-    st.caption("Pembantu ini menjawab berdasarkan data semasa dalam dashboard ini.")
+
+    def _kunci_gemini():
+        try:
+            k = st.secrets.get("GEMINI_API_KEY", "")
+        except Exception:
+            k = ""
+        return k or os.environ.get("GEMINI_API_KEY", "")
+
+    def _konteks_live():
+        b = [f"Tarikh semasa: {_now_my().strftime('%d %b %Y')}."]
+        if gdacs_ok and not g_dalam.empty:
+            b.append("Peristiwa GDACS dalam sempadan Malaysia:")
+            for _, r in g_dalam.iterrows():
+                b.append(f"- {r['jenis']}: {r['nama']} (amaran {r['aras']}, "
+                         f"{r['dari_dt'].strftime('%d %b %Y')})")
+        else:
+            b.append("Tiada peristiwa aktif GDACS dalam sempadan Malaysia.")
+        if ifrc_ok and not ifrc_my.empty:
+            b.append("Operasi IFRC melibatkan Malaysia:")
+            for _, r in ifrc_my.head(5).iterrows():
+                b.append(f"- {r['peristiwa']} ({r['tarikh']}, tahap {r['tahap']})")
+        if aha_ok and not aha.empty:
+            b.append("Flash Update AHA terkini berkaitan Malaysia:")
+            for _, r in aha.head(4).iterrows():
+                b.append(f"- {r['tajuk']} ({r['tarikh']})")
+        if news_ok and not news.empty:
+            b.append("Tajuk berita terkini:")
+            for _, r in news.head(5).iterrows():
+                b.append(f"- [{r['sumber']}] {r['tajuk']}")
+        return "\n".join(b)
+
+    ARAHAN_SISTEM = (
+        "Kau pembantu AI Dashboard Bencana Alam Malaysia. Jawab dalam Bahasa Melayu, "
+        "ringkas dan tepat, berdasarkan KONTEKS DATA LIVE di bawah. Kalau soalan di luar "
+        "konteks data, jawab seadanya tanpa mereka-reka fakta, dan rujuk pengguna ke "
+        "MET Malaysia / NADMA / talian 999 untuk kecemasan. Jangan reka angka atau peristiwa.\n\n"
+        "KONTEKS DATA LIVE:\n" + _konteks_live()
+    )
+
+    kunci = _kunci_gemini()
+    guna_gemini, model = False, None
+    if kunci:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=kunci)
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            guna_gemini = True
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"Gemini tidak dapat dimulakan ({e}). Guna mod asas.")
+
+    if guna_gemini:
+        st.caption("Dikuasakan oleh Google Gemini ✦ — menjawab berdasarkan data live dashboard.")
+    else:
+        st.caption("Mod asas (tanpa kunci API). Untuk jawapan AI penuh, tambah GEMINI_API_KEY "
+                   "dalam Streamlit Secrets — [dapatkan kunci percuma](https://aistudio.google.com/apikey).")
 
     def _ringkas_event(r):
         return f"{r['jenis']} — {r['nama']} (amaran {r['aras']}, {r['dari_dt'].strftime('%d %b %Y')})"
 
-    def _jawab(q, ctx):
+    def _jawab_asas(q, ctx):
         t = q.lower().strip()
         g_dalam, ifrc_my, aha, news = (ctx["g_dalam"], ctx["ifrc_my"],
                                       ctx["aha"], ctx["news"])
@@ -501,8 +556,7 @@ with tab_live:
 
         if ada("assalamualaikum", "hai", "hello", "hi", "selamat"):
             return ("Waalaikumsalam / hai! Tanya aku tentang bencana semasa di Malaysia — "
-                    "contoh: 'banjir terkini di mana?', 'gempa terkuat?', 'berita terkini?', "
-                    "'berapa peristiwa aktif?'")
+                    "contoh: 'banjir terkini di mana?', 'berita terkini?', 'berapa peristiwa aktif?'")
         if ada("terima kasih", "thanks", "tq"):
             return "Sama-sama! Kalau ada soalan lain tentang bencana di Malaysia, tanya je."
         if ada("kecemasan", "bantuan", "hubungi", "telefon", "talian"):
@@ -565,7 +619,7 @@ with tab_live:
         st.session_state.bantuan_msgs = [{
             "role": "assistant",
             "content": ("Hai! Aku pembantu dashboard ni 🤖 Tanya aku tentang bencana semasa di Malaysia — "
-                        "contoh: 'banjir terkini di mana?', 'gempa terkuat?', 'berita terkini?'"),
+                        "contoh: 'banjir terkini di mana?', 'berita terkini?'"),
         }]
     for m in st.session_state.bantuan_msgs:
         with st.chat_message(m["role"]):
@@ -574,7 +628,19 @@ with tab_live:
         st.session_state.bantuan_msgs.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-        jawapan = _jawab(prompt, ctx)
+        if guna_gemini:
+            with st.spinner("Gemini sedang berfikir..."):
+                try:
+                    riwayat = "\n".join(
+                        f"{'Pengguna' if m['role'] == 'user' else 'Pembantu'}: {m['content']}"
+                        for m in st.session_state.bantuan_msgs[-8:])
+                    resp = model.generate_content(
+                        ARAHAN_SISTEM + f"\n\nRiwayat perbualan:\n{riwayat}\n\nSoalan baharu: {prompt}")
+                    jawapan = (resp.text or "").strip() or "Gemini tidak mengembalikan jawapan. Cuba lagi."
+                except Exception as e:  # noqa: BLE001
+                    jawapan = f"Gemini gagal menjawab ({e}). Cuba lagi sebentar."
+        else:
+            jawapan = _jawab_asas(prompt, ctx)
         st.session_state.bantuan_msgs.append({"role": "assistant", "content": jawapan})
         with st.chat_message("assistant"):
             st.markdown(jawapan)

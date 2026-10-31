@@ -35,3 +35,4 @@ uvicorn==0.54.0
 watchdog==6.0.0
 websockets==17.3
 streamlit-autorefresh==1.0.1
+google-generativeai==0.8.6
