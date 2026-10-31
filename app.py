@@ -1,15 +1,13 @@
 """Papan Pemuka Bencana Alam Malaysia — versi Live (Malaysia sahaja).
 
 Gabungan:
-- LIVE: peristiwa GDACS yang melibatkan Malaysia + gempa bumi terkini USGS
-  berhampiran Malaysia + operasi IFRC melibatkan Malaysia + Flash Update
-  AHA Centre berkaitan Malaysia + berita terkini. Auto-refresh setiap 10 minit
-  (lebih kerap daripada kemas kini setiap jam).
+- LIVE: peristiwa GDACS yang melibatkan Malaysia + operasi IFRC melibatkan
+  Malaysia + Flash Update AHA Centre berkaitan Malaysia + berita terkini.
+  Auto-refresh setiap 10 minit (lebih kerap daripada kemas kini setiap jam).
 - SEJARAH: data EM-DAT 2000–2025 (CSV statik dalam repo).
 
 Sumber live (semuanya ditapis untuk Malaysia sahaja):
 - GDACS (UN/OCHA & EC JRC): https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH
-- USGS Earthquake Hazards Program: https://earthquake.usgs.gov/fdsnws/event/1/
 - IFRC GO (Persekutuan Antarabangsa Palang Merah): https://goadmin.ifrc.org/api/v2/event/
 - AHA Centre (ASEAN): https://ahacentre.org/wp-json/
 Jalankan: ./run.sh
@@ -21,6 +19,7 @@ import re
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
@@ -62,6 +61,17 @@ def _now_my():
     return datetime.now(timezone.utc).astimezone()
 
 
+def _dalam_sempadan_my(lat, lon) -> bool:
+    """Semak titik dalam sempadan kasar Malaysia (Semenanjung + Sabah/Sarawak)."""
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return False
+    semenanjung = 0.8 <= lat <= 7.6 and 99.4 <= lon <= 104.7
+    borneo = 0.5 <= lat <= 7.6 and 108.9 <= lon <= 119.6
+    return semenanjung or borneo
+
+
 @st.cache_data(ttl=600)
 def fetch_gdacs() -> pd.DataFrame:
     """Peristiwa bencana semasa dari GDACS (ditapis untuk Malaysia di paparan)."""
@@ -99,44 +109,10 @@ def fetch_gdacs() -> pd.DataFrame:
     if not df.empty:
         df["dari_dt"] = pd.to_datetime(df["dari"], errors="coerce", utc=True)
         df = df.sort_values("dari_dt", ascending=False).reset_index(drop=True)
-    df.attrs["fetched_at"] = _now_my()
-    return df
-
-
-@st.cache_data(ttl=600)
-def fetch_usgs() -> pd.DataFrame:
-    """Gempa M4+ dalam 30 hari di sekitar Malaysia (9°S–8°N, 99°E–106°E)."""
-    r = requests.get(
-        "https://earthquake.usgs.gov/fdsnws/event/1/query",
-        params={
-            "format": "geojson",
-            "starttime": (
-                datetime.now(timezone.utc).date()
-                - pd.Timedelta(days=30)
-            ).isoformat(),
-            "minlatitude": -9, "maxlatitude": 8,
-            "minlongitude": 99, "maxlongitude": 106,
-            "minmagnitude": 4, "orderby": "time", "limit": 50,
-        },
-        timeout=25,
-    )
-    r.raise_for_status()
-    feats = r.json().get("features", [])
-    rows = []
-    for f in feats:
-        p = f.get("properties", {}) or {}
-        c = (f.get("geometry", {}) or {}).get("coordinates") or [None, None, None]
-        rows.append(
-            {
-                "masa": pd.to_datetime(p.get("time"), unit="ms", utc=True),
-                "magnitud": p.get("mag"),
-                "lokasi": p.get("place"),
-                "kedalaman_km": c[2],
-                "lon": c[0], "lat": c[1],
-                "url": p.get("url"),
-            }
-        )
-    df = pd.DataFrame(rows).sort_values("masa", ascending=False).reset_index(drop=True)
+        df["dalam_my"] = [_dalam_sempadan_my(la, lo)
+                          for la, lo in zip(df["lat"], df["lon"])]
+    else:
+        df["dalam_my"] = pd.Series(dtype=bool)
     df.attrs["fetched_at"] = _now_my()
     return df
 
@@ -291,7 +267,7 @@ def fetch_news() -> pd.DataFrame:
 st.title("🇲🇾 DASHBOARD BENCANA ALAM MALAYSIA")
 tab_live, tab_sejarah = st.tabs(["🔴 Live Sekarang", "📚 Sejarah 2000–2025 (EM-DAT)"])
 
-# ================= TAB LIVE (Malaysia sahaja) =================
+# ================= TAB LIVE (Malaysia sahaja, tapis ketat) =================
 with tab_live:
     try:
         g = fetch_gdacs()
@@ -300,42 +276,47 @@ with tab_live:
         g, gdacs_ok = pd.DataFrame(), False
         st.warning(f"Gagal tarik data GDACS buat masa ini ({e}). Cuba lagi sebentar.")
     try:
-        q = fetch_usgs()
-        usgs_ok = not q.empty
-    except Exception as e:  # noqa: BLE001
-        q, usgs_ok = pd.DataFrame(), False
-        st.warning(f"Gagal tarik data gempa USGS buat masa ini ({e}).")
-    try:
         ifrc = fetch_ifrc()
         ifrc_ok = not ifrc.empty
     except Exception as e:  # noqa: BLE001
         ifrc, ifrc_ok = pd.DataFrame(), False
         ifrc_err = e
+    try:
+        aha = fetch_aha()
+        aha_ok = not aha.empty
+    except Exception as e:  # noqa: BLE001
+        aha, aha_ok = pd.DataFrame(), False
+        aha_err = e
 
-    g_my = g[g["melibatkan_my"]] if gdacs_ok else pd.DataFrame()
+    # Tapis ketat: koordinat dalam sempadan Malaysia (termasuk Sabah/Sarawak)
+    # DAN Malaysia tersenarai sebagai negara terjejas
+    if gdacs_ok and "dalam_my" in g.columns:
+        g_dalam = g[g["dalam_my"] & g["melibatkan_my"]]
+    else:
+        g_dalam = pd.DataFrame()
     ifrc_my = ifrc[ifrc["melibatkan_my"]] if ifrc_ok else pd.DataFrame()
 
     if gdacs_ok:
         live_badge(g.attrs["fetched_at"])
     st.caption(
-        "Semua paparan di bawah ditapis untuk Malaysia sahaja. "
-        "Sumber live: GDACS (PBB/OCHA & EC-JRC), USGS (gempa), IFRC, AHA Centre, "
-        "Google News. Angka GDACS ialah anggaran impak automatik, bukan angka rasmi."
+        "Tapis ketat: hanya bencana dalam sempadan Malaysia (termasuk Sabah & Sarawak). "
+        "Sumber live: GDACS (PBB/OCHA & EC-JRC), IFRC, AHA Centre, Google News. "
+        "Angka GDACS ialah anggaran impak automatik, bukan angka rasmi."
     )
 
     if gdacs_ok:
-        n_red_my = int((g_my["aras"] == "Red").sum()) if not g_my.empty else 0
+        n_red_dalam = int((g_dalam["aras"] == "Red").sum()) if not g_dalam.empty else 0
 
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Peristiwa aktif", f"{len(g_my):,}")
-        k2.metric("Amaran merah", f"{n_red_my:,}")
-        k3.metric("Gempa 30 hari", f"{len(q):,}" if usgs_ok else "–")
-        k4.metric("Operasi IFRC", f"{len(ifrc_my):,}" if ifrc_ok else "–")
+        k1.metric("Peristiwa aktif", f"{len(g_dalam):,}")
+        k2.metric("Amaran merah", f"{n_red_dalam:,}")
+        k3.metric("Operasi IFRC", f"{len(ifrc_my):,}" if ifrc_ok else "–")
+        k4.metric("Flash Update AHA", f"{len(aha):,}" if aha_ok else "–")
 
-        # --- Peristiwa semasa melibatkan Malaysia ---
-        st.subheader("⚠️ Peristiwa semasa melibatkan Malaysia")
-        if not g_my.empty:
-            my = g_my.copy()
+        # --- Peristiwa dalam sempadan Malaysia ---
+        st.subheader("⚠️ Peristiwa dalam Malaysia")
+        if not g_dalam.empty:
+            my = g_dalam.copy()
             my["tarikh"] = my["dari_dt"].dt.strftime("%d %b %Y")
             st.dataframe(
                 my[["tarikh", "jenis", "nama", "aras", "url"]].rename(columns={
@@ -346,42 +327,67 @@ with tab_live:
                 column_config={"Pautan GDACS": st.column_config.LinkColumn()},
             )
         else:
-            st.info("Tiada peristiwa aktif melibatkan Malaysia dalam GDACS buat masa ini.")
+            st.info("Tiada peristiwa aktif dalam sempadan Malaysia (termasuk Sabah & Sarawak) "
+                    "dalam rekod GDACS buat masa ini. Semak seksyen Berita dan AHA Centre "
+                    "untuk laporan bencana tempatan terkini.")
 
-        # --- Peta Malaysia: kawasan terkesan ---
+        # --- Peta Malaysia: kawasan terkesan (lengkap dengan petunjuk) ---
         st.subheader("🇲🇾 Peta Malaysia — kawasan terkesan")
+        # Label negeri sebagai lapisan rujukan geografi
+        NEGERI = [
+            ("Perlis", 6.44, 100.20), ("Kedah", 6.12, 100.37),
+            ("P. Pinang", 5.41, 100.33), ("Perak", 4.60, 101.07),
+            ("Selangor", 3.35, 101.28), ("KL", 3.14, 101.78),
+            ("Putrajaya", 2.82, 101.72), ("N. Sembilan", 2.73, 102.24),
+            ("Melaka", 2.19, 102.25), ("Johor", 1.49, 103.76),
+            ("Pahang", 3.81, 102.25), ("Terengganu", 5.33, 103.14),
+            ("Kelantan", 5.32, 102.10), ("Sarawak", 2.00, 113.60),
+            ("Sabah", 5.98, 116.07), ("Labuan", 5.28, 115.23),
+        ]
         pts = []
-        if not g_my.empty:
-            for _, r in g_my.dropna(subset=["lat", "lon"]).iterrows():
-                pts.append({"lat": r["lat"], "lon": r["lon"],
-                            "kategori": f"GDACS: {r['jenis']} ({r['aras']})",
-                            "label": f"{r['nama']} — {r['jenis']}, amaran {r['aras']}"})
-        if usgs_ok and not q.empty:
-            for _, r in q.dropna(subset=["lat", "lon"]).iterrows():
-                pts.append({"lat": r["lat"], "lon": r["lon"],
-                            "kategori": "USGS: Gempa bumi",
-                            "label": f"M{r['magnitud']:.1f} — {r['lokasi']}"})
-        if pts:
-            pm = pd.DataFrame(pts)
-            figm = px.scatter_map(
-                pm, lat="lat", lon="lon", color="kategori",
-                hover_name="label", zoom=5,
-                center=dict(lat=4.2, lon=102.2), height=520,
-                title="Titik peristiwa GDACS & gempa USGS di sekitar Malaysia",
-                color_discrete_map={
-                    "GDACS: Banjir (Red)": "#d62728",
-                    "GDACS: Banjir (Orange)": "#ff7f0e",
-                    "USGS: Gempa bumi": "#1f77b4",
-                },
-            )
-            figm.update_layout(map_style="open-street-map",
-                               margin=dict(l=0, r=0, t=40, b=0))
-            # kategori GDACS lain yang tidak dijangka — warna lalai
-            st.plotly_chart(figm, use_container_width=True)
-            st.caption("Peta: OpenStreetMap. Titik merah/oren = peristiwa GDACS "
-                       "melibatkan Malaysia; biru = gempa USGS 30 hari.")
-        elif gdacs_ok:
-            st.info("Tiada titik peristiwa melibatkan Malaysia buat masa ini.")
+        if not g_dalam.empty:
+            for _, r in g_dalam.dropna(subset=["lat", "lon"]).iterrows():
+                merah = r["aras"] == "Red"
+                pts.append({
+                    "lat": r["lat"], "lon": r["lon"],
+                    "kategori": ("🔴 Banjir — Amaran Merah (GDACS)" if merah
+                                 else "🟠 Banjir — Amaran Oren (GDACS)"),
+                    "label": f"{r['nama']} — {r['jenis']}, amaran {r['aras']}",
+                    "saiz": 20 if merah else 15,
+                })
+        pm = pd.DataFrame(pts)
+        figm = px.scatter_map(
+            pm, lat="lat", lon="lon", color="kategori", size="saiz",
+            hover_name="label", zoom=5,
+            center=dict(lat=4.0, lon=110.0), height=560,
+            title="Peta bencana Malaysia — Semenanjung, Sabah & Sarawak",
+            color_discrete_map={
+                "🔴 Banjir — Amaran Merah (GDACS)": "#d62728",
+                "🟠 Banjir — Amaran Oren (GDACS)": "#ff7f0e",
+            },
+        ) if not pm.empty else px.scatter_map(
+            pd.DataFrame({"lat": [4.0], "lon": [110.0]}),
+            lat="lat", lon="lon", zoom=5,
+            center=dict(lat=4.0, lon=110.0), height=560,
+            title="Peta Malaysia — Semenanjung, Sabah & Sarawak",
+        )
+        # lapisan label negeri (rujukan sahaja, tiada dalam petunjuk)
+        figm.add_trace(go.Scattermap(
+            lat=[n[1] for n in NEGERI], lon=[n[2] for n in NEGERI],
+            mode="text", text=[n[0] for n in NEGERI],
+            textfont=dict(size=10, color="#555555"),
+            showlegend=False, hoverinfo="skip",
+        ))
+        figm.update_layout(
+            map_style="open-street-map",
+            margin=dict(l=0, r=0, t=40, b=0),
+            legend=dict(title="Petunjuk", yanchor="top", y=0.99,
+                        xanchor="left", x=0.01,
+                        bgcolor="rgba(255,255,255,0.85)"),
+        )
+        st.plotly_chart(figm, use_container_width=True)
+        st.caption("Peta: OpenStreetMap. 🔴/🟠 = banjir GDACS dalam sempadan Malaysia "
+                   "(saiz ikut tahap amaran). Label negeri sebagai rujukan lokasi.")
 
     # --- IFRC: operasi melibatkan Malaysia ---
     st.divider()
@@ -424,12 +430,6 @@ with tab_live:
         st.link_button("AHA Centre (ASEAN)", "https://ahacentre.org/")
 
     st.markdown("**🟧 AHA Centre — Flash Update berkaitan Malaysia**")
-    try:
-        aha = fetch_aha()
-        aha_ok = True
-    except Exception as e:
-        aha_ok = False
-        aha_err = e
     if aha_ok and not aha.empty:
         st.caption(
             f"Ditarik pada {aha.attrs['fetched_at'].strftime('%d %b %Y, %H:%M')} — "
@@ -450,59 +450,14 @@ with tab_live:
     else:
         st.warning(f"Data AHA gagal dimuatkan: {aha_err}. Paparan lain tidak terjejas.")
 
-    # --- Gempa USGS ---
-    st.divider()
-    st.subheader("🌊 Gempa bumi terkini berhampiran Malaysia (USGS, 30 hari)")
-    if usgs_ok:
-        st.caption(
-            f"Ditarik pada {q.attrs['fetched_at'].strftime('%d %b %Y, %H:%M')} — "
-            "kawasan 9°S–8°N, 99°E–106°E (termasuk Sumatera; gegaran boleh dirasai di Malaysia)."
-        )
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Gempa M4+ (30 hari)", f"{len(q)}")
-        c2.metric("Magnitud terbesar", f"M{q['magnitud'].max():.1f}")
-        latest_q = q.iloc[0]
-        c3.metric("Terkini", f"M{latest_q['magnitud']:.1f}",
-                  latest_q["lokasi"][:35])
-
-        qm = q.dropna(subset=["lat", "lon"])
-        if not qm.empty:
-            fig2 = px.scatter_map(
-                qm, lat="lat", lon="lon", size="magnitud",
-                hover_name="lokasi",
-                hover_data={"magnitud": True, "kedalaman_km": True,
-                            "lat": False, "lon": False},
-                color_discrete_sequence=["#d62728"],
-                zoom=4, center=dict(lat=2.5, lon=103), height=480,
-                title="Episenter gempa (saiz ikut magnitud)",
-                size_max=22,
-            )
-            fig2.update_layout(map_style="open-street-map",
-                               margin=dict(l=0, r=0, t=40, b=0))
-            st.plotly_chart(fig2, use_container_width=True)
-            st.caption("Peta: OpenStreetMap.")
-
-        qs = q.head(15).copy()
-        qs["masa_str"] = qs["masa"].dt.strftime("%d %b %Y %H:%M UTC")
-        st.dataframe(
-            qs[["masa_str", "magnitud", "lokasi", "kedalaman_km", "url"]].rename(columns={
-                "masa_str": "Masa", "magnitud": "Magnitud", "lokasi": "Lokasi",
-                "kedalaman_km": "Kedalaman (km)", "url": "Pautan USGS",
-            }),
-            use_container_width=True, hide_index=True,
-            column_config={"Pautan USGS": st.column_config.LinkColumn()},
-        )
-    else:
-        st.info("Data gempa tidak dapat ditarik buat masa ini.")
-
     with st.expander("⚠️ Nota tentang data live"):
         st.markdown(
             """
 - **GDACS**: tahap amaran (Green/Orange/Red) ialah anggaran automatik berdasarkan
   model impak — bukan pengisytiharan rasmi kerajaan.
 - **Tarikh banjir** GDACS kadangkala ialah tarikh ramalan model (boleh ke hadapan).
-- **USGS**: kebanyakan gempa dalam bbox ini berpusat di Sumatera, Indonesia —
-  gegarannya dirasai di Semenanjung, tetapi ia bukan gempa "di Malaysia".
+- Tapis ketat: hanya peristiwa dengan koordinat dalam sempadan Malaysia
+  (Semenanjung + Sabah/Sarawak) yang dipaparkan dalam peta dan jadual.
 - Data live di-cache 10 minit dan app refresh automatik setiap 10 minit.
 - Berita: agregat Google News RSS dari outlet berlesen (Bernama, Astro Awani,
   BH, Utusan, Sinar Harian dll.), dikemas kini setiap 30 minit.
@@ -529,6 +484,100 @@ with tab_live:
                         f"<sub>{masa}</sub>", unsafe_allow_html=True)
     else:
         st.info("Tiada berita dapat ditarik buat masa ini.")
+
+    # --- Pembantu AI (jawab dari data live dashboard) ---
+    st.divider()
+    st.subheader("🤖 Pembantu AI — tanya tentang bencana di Malaysia")
+    st.caption("Pembantu ini menjawab berdasarkan data semasa dalam dashboard ini.")
+
+    def _ringkas_event(r):
+        return f"{r['jenis']} — {r['nama']} (amaran {r['aras']}, {r['dari_dt'].strftime('%d %b %Y')})"
+
+    def _jawab(q, ctx):
+        t = q.lower().strip()
+        g_dalam, ifrc_my, aha, news = (ctx["g_dalam"], ctx["ifrc_my"],
+                                      ctx["aha"], ctx["news"])
+        ada = lambda *ks: any(k in t for k in ks)
+
+        if ada("assalamualaikum", "hai", "hello", "hi", "selamat"):
+            return ("Waalaikumsalam / hai! Tanya aku tentang bencana semasa di Malaysia — "
+                    "contoh: 'banjir terkini di mana?', 'gempa terkuat?', 'berita terkini?', "
+                    "'berapa peristiwa aktif?'")
+        if ada("terima kasih", "thanks", "tq"):
+            return "Sama-sama! Kalau ada soalan lain tentang bencana di Malaysia, tanya je."
+        if ada("kecemasan", "bantuan", "hubungi", "telefon", "talian"):
+            return ("Untuk kecemasan, hubungi **999**. Maklumat pusat pemindahan (PPS) dan "
+                    "bantuan banjir ada di Portal Bencana NADMA — pautannya dalam seksyen "
+                    "🏛️ Agensi di atas.")
+        if ada("berita"):
+            if news is not None and not news.empty:
+                items = [f"• [{r['sumber']}] {r['tajuk']}" for _, r in news.head(3).iterrows()]
+                return "Berita terkini:\n" + "\n".join(items)
+            return "Tiada berita dapat ditarik buat masa ini."
+        if ada("gempa", "gegaran", "earthquake"):
+            return ("Maklumat gempa bumi tiada dalam dashboard ini — semak laman MET Malaysia "
+                    "(pautan dalam seksyen 🏛️ Agensi di atas) untuk info gempa terkini.")
+        if ada("banjir", "flood"):
+            if g_dalam is None or g_dalam.empty:
+                return ("Tiada banjir aktif dalam sempadan Malaysia dalam rekod GDACS buat masa ini. "
+                        "Semak seksyen Berita untuk laporan banjir terkini dari media.")
+            return "Banjir dalam Malaysia (GDACS):\n" + "\n".join(
+                f"• {_ringkas_event(r)}" for _, r in g_dalam.iterrows())
+        if ada("amaran merah", "red alert"):
+            reds = g_dalam[g_dalam["aras"] == "Red"] if g_dalam is not None else pd.DataFrame()
+            if reds.empty:
+                return "Tiada amaran merah dalam Malaysia buat masa ini."
+            return "Amaran merah:\n" + "\n".join(f"• {_ringkas_event(r)}" for _, r in reds.iterrows())
+        if ada("ifrc", "palang merah", "operasi"):
+            if ifrc_my is None or ifrc_my.empty:
+                return "Tiada operasi IFRC melibatkan Malaysia buat masa ini."
+            return "Operasi IFRC melibatkan Malaysia:\n" + "\n".join(
+                f"• {r['peristiwa']} ({r['tarikh']})" for _, r in ifrc_my.iterrows())
+        if ada("aha", "asean", "flash update"):
+            if aha is None or aha.empty:
+                return "Tiada Flash Update AHA berkaitan Malaysia buat masa ini."
+            return "Flash Update AHA terkini berkaitan Malaysia:\n" + "\n".join(
+                f"• {r['tajuk']} ({r['tarikh']})" for _, r in aha.head(3).iterrows())
+        if ada("berapa", "jumlah", "bilangan", "statistik"):
+            n_g = len(g_dalam) if g_dalam is not None else 0
+            n_i = len(ifrc_my) if ifrc_my is not None else 0
+            n_a = len(aha) if aha is not None else 0
+            return (f"Ringkasan semasa Malaysia: **{n_g}** peristiwa aktif dalam sempadan (GDACS), "
+                    f"**{n_i}** operasi IFRC, **{n_a}** Flash Update AHA.")
+        if ada("gdacs"):
+            return ("GDACS (Global Disaster Alert and Coordination System) ialah sistem amaran "
+                    "bencana PBB/OCHA & Suruhanjaya Eropah. Ia hanya merekod peristiwa melepasi "
+                    "ambang tertentu — sebab itu banjir tempatan kecil tidak tersenarai.")
+        if ada("nadma", "met malaysia", "jps", "agensi"):
+            return ("Agensi berkaitan: MET Malaysia (amaran cuaca), NADMA (pengurusan bencana & PPS), "
+                    "JPS InfoBanjir (aras sungai). Pautan terus ada dalam seksyen 🏛️ Agensi di atas.")
+        if ada("siapa buat", "pembuat", "owner"):
+            return "Dashboard ini dibina oleh hijazi — data live dari GDACS, IFRC, AHA Centre dan Google News."
+        return ("Aku boleh jawab tentang: peristiwa semasa, banjir, amaran merah, berita terkini, "
+                "operasi IFRC, Flash Update AHA, dan agensi bantuan. Cuba tanya contoh: "
+                "'banjir terkini di mana?'")
+
+    ctx = {"g_dalam": g_dalam,
+           "ifrc_my": ifrc_my, "aha": aha if aha_ok else pd.DataFrame(),
+           "news": news if news_ok else pd.DataFrame()}
+
+    if "bantuan_msgs" not in st.session_state:
+        st.session_state.bantuan_msgs = [{
+            "role": "assistant",
+            "content": ("Hai! Aku pembantu dashboard ni 🤖 Tanya aku tentang bencana semasa di Malaysia — "
+                        "contoh: 'banjir terkini di mana?', 'gempa terkuat?', 'berita terkini?'"),
+        }]
+    for m in st.session_state.bantuan_msgs:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+    if prompt := st.chat_input("Tanya tentang bencana di Malaysia..."):
+        st.session_state.bantuan_msgs.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        jawapan = _jawab(prompt, ctx)
+        st.session_state.bantuan_msgs.append({"role": "assistant", "content": jawapan})
+        with st.chat_message("assistant"):
+            st.markdown(jawapan)
 
 # ================= TAB SEJARAH =================
 with tab_sejarah:
