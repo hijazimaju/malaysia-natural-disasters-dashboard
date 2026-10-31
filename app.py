@@ -638,7 +638,15 @@ with tab_live:
                         ARAHAN_SISTEM + f"\n\nRiwayat perbualan:\n{riwayat}\n\nSoalan baharu: {prompt}")
                     jawapan = (resp.text or "").strip() or "Gemini tidak mengembalikan jawapan. Cuba lagi."
                 except Exception as e:  # noqa: BLE001
-                    jawapan = f"Gemini gagal menjawab ({e}). Cuba lagi sebentar."
+                    msg = str(e)
+                    if "API_KEY_INVALID" in msg or "API key not valid" in msg:
+                        jawapan = ("Kunci API Gemini tidak sah. Semak semula kunci dalam "
+                                   "Streamlit Secrets (Settings → Secrets): pastikan kunci disalin "
+                                   "penuh dari [Google AI Studio](https://aistudio.google.com/apikey), "
+                                   "tiada sekatan API pada kunci tersebut, dan 'Generative Language API' "
+                                   "diaktifkan dalam projek Google Cloud kau.")
+                    else:
+                        jawapan = f"Gemini gagal menjawab ({e}). Cuba lagi sebentar."
         else:
             jawapan = _jawab_asas(prompt, ctx)
         st.session_state.bantuan_msgs.append({"role": "assistant", "content": jawapan})
