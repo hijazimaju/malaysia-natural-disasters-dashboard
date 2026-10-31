@@ -1,15 +1,17 @@
-"""Papan Pemuka Bencana Alam Malaysia — versi Live.
+"""Papan Pemuka Bencana Alam Malaysia — versi Live (Malaysia sahaja).
 
 Gabungan:
-- LIVE: peristiwa semasa GDACS (global, dikemas kini berterusan) + gempa bumi
-  terkini USGS berhampiran Malaysia + operasi kecemasan IFRC.
-  Auto-refresh setiap 10 minit.
+- LIVE: peristiwa GDACS yang melibatkan Malaysia + gempa bumi terkini USGS
+  berhampiran Malaysia + operasi IFRC melibatkan Malaysia + Flash Update
+  AHA Centre berkaitan Malaysia + berita terkini. Auto-refresh setiap 10 minit
+  (lebih kerap daripada kemas kini setiap jam).
 - SEJARAH: data EM-DAT 2000–2025 (CSV statik dalam repo).
 
-Sumber live:
+Sumber live (semuanya ditapis untuk Malaysia sahaja):
 - GDACS (UN/OCHA & EC JRC): https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH
 - USGS Earthquake Hazards Program: https://earthquake.usgs.gov/fdsnws/event/1/
 - IFRC GO (Persekutuan Antarabangsa Palang Merah): https://goadmin.ifrc.org/api/v2/event/
+- AHA Centre (ASEAN): https://ahacentre.org/wp-json/
 Jalankan: ./run.sh
 """
 
@@ -36,7 +38,7 @@ TYPE_LABEL = {
 }
 ALERT_COLOR = {"Red": "#d62728", "Orange": "#ff7f0e", "Green": "#2ca02c"}
 
-st.set_page_config(page_title="World Natural Disaster Dashboard", layout="wide")
+st.set_page_config(page_title="Dashboard Bencana Alam Malaysia", layout="wide")
 
 # CSS mesra telefon: padding lebih ketat & tajuk lebih kecil pada skrin sempit.
 st.markdown(
@@ -62,7 +64,7 @@ def _now_my():
 
 @st.cache_data(ttl=600)
 def fetch_gdacs() -> pd.DataFrame:
-    """Peristiwa bencana semasa dari GDACS (dunia)."""
+    """Peristiwa bencana semasa dari GDACS (ditapis untuk Malaysia di paparan)."""
     r = requests.get(
         "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH",
         timeout=25,
@@ -141,11 +143,11 @@ def fetch_usgs() -> pd.DataFrame:
 
 @st.cache_data(ttl=1800)
 def fetch_ifrc() -> pd.DataFrame:
-    """Operasi kecemasan terkini IFRC (dunia) — Persekutuan Antarabangsa
-    Palang Merah & Bulan Sabit Merah."""
+    """Operasi kecemasan terkini IFRC — Persekutuan Antarabangsa
+    Palang Merah & Bulan Sabit Merah (ditapis untuk Malaysia di paparan)."""
     r = requests.get(
         "https://goadmin.ifrc.org/api/v2/event/",
-        params={"ordering": "-created_at", "limit": 150},
+        params={"ordering": "-created_at", "limit": 250},
         timeout=25,
     )
     r.raise_for_status()
@@ -286,10 +288,10 @@ def fetch_news() -> pd.DataFrame:
 
 
 # ================= HEADER =================
-st.title("🌍 WORLD NATURAL DISASTER DASHBOARD")
+st.title("🇲🇾 DASHBOARD BENCANA ALAM MALAYSIA")
 tab_live, tab_sejarah = st.tabs(["🔴 Live Sekarang", "📚 Sejarah 2000–2025 (EM-DAT)"])
 
-# ================= TAB LIVE =================
+# ================= TAB LIVE (Malaysia sahaja) =================
 with tab_live:
     try:
         g = fetch_gdacs()
@@ -303,60 +305,36 @@ with tab_live:
     except Exception as e:  # noqa: BLE001
         q, usgs_ok = pd.DataFrame(), False
         st.warning(f"Gagal tarik data gempa USGS buat masa ini ({e}).")
+    try:
+        ifrc = fetch_ifrc()
+        ifrc_ok = not ifrc.empty
+    except Exception as e:  # noqa: BLE001
+        ifrc, ifrc_ok = pd.DataFrame(), False
+        ifrc_err = e
+
+    g_my = g[g["melibatkan_my"]] if gdacs_ok else pd.DataFrame()
+    ifrc_my = ifrc[ifrc["melibatkan_my"]] if ifrc_ok else pd.DataFrame()
 
     if gdacs_ok:
         live_badge(g.attrs["fetched_at"])
     st.caption(
-        "Sumber live: GDACS (PBB/OCHA & EC-JRC) untuk peristiwa bencana semasa dunia; "
-        "USGS untuk gempa bumi. Angka GDACS ialah anggaran impak automatik, bukan angka rasmi."
+        "Semua paparan di bawah ditapis untuk Malaysia sahaja. "
+        "Sumber live: GDACS (PBB/OCHA & EC-JRC), USGS (gempa), IFRC, AHA Centre, "
+        "Google News. Angka GDACS ialah anggaran impak automatik, bukan angka rasmi."
     )
 
     if gdacs_ok:
-        n_red = int((g["aras"] == "Red").sum())
-        g_my = g[g["melibatkan_my"]]
-        latest = g.iloc[0]
+        n_red_my = int((g_my["aras"] == "Red").sum()) if not g_my.empty else 0
 
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Peristiwa aktif (dunia)", f"{len(g):,}")
-        k2.metric("Melibatkan Malaysia", f"{len(g_my):,}")
-        k3.metric("Amaran merah", f"{n_red:,}")
-        k4.metric(
-            "Peristiwa terkini",
-            latest["jenis"],
-            f"{latest['nama'][:32]}",
-        )
+        k1.metric("Peristiwa aktif", f"{len(g_my):,}")
+        k2.metric("Amaran merah", f"{n_red_my:,}")
+        k3.metric("Gempa 30 hari", f"{len(q):,}" if usgs_ok else "–")
+        k4.metric("Operasi IFRC", f"{len(ifrc_my):,}" if ifrc_ok else "–")
 
-        # --- Peta peristiwa ---
-        st.subheader("🗺️ Peta peristiwa semasa")
-        gm = g.dropna(subset=["lat", "lon"]).copy()
-        gm["warna"] = gm["aras"].map(ALERT_COLOR).fillna("#7f7f7f")
-        fig = px.scatter_map(
-            gm, lat="lat", lon="lon", color="aras",
-            color_discrete_map=ALERT_COLOR,
-            hover_name="nama",
-            hover_data={"jenis": True, "negara": True, "dari": True,
-                        "lat": False, "lon": False, "aras": False},
-            zoom=1, height=520,
-            title="Peristiwa bencana aktif (GDACS) — warna ikut tahap amaran",
-        )
-        fig.update_layout(map_style="open-street-map",
-                          margin=dict(l=0, r=0, t=40, b=0))
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption("Peta: OpenStreetMap.")
-
-        # --- Jadual peristiwa terkini ---
-        st.subheader("📋 Peristiwa terkini")
-        show = g.head(25).copy()
-        show["tarikh"] = show["dari_dt"].dt.strftime("%d %b %Y")
-        st.dataframe(
-            show[["tarikh", "jenis", "nama", "negara", "aras"]].rename(columns={
-                "tarikh": "Tarikh", "jenis": "Jenis", "nama": "Nama peristiwa",
-                "negara": "Negara", "aras": "Amaran",
-            }),
-            use_container_width=True, hide_index=True,
-        )
+        # --- Peristiwa semasa melibatkan Malaysia ---
+        st.subheader("⚠️ Peristiwa semasa melibatkan Malaysia")
         if not g_my.empty:
-            st.subheader("⚠️ Melibatkan Malaysia")
             my = g_my.copy()
             my["tarikh"] = my["dari_dt"].dt.strftime("%d %b %Y")
             st.dataframe(
@@ -367,6 +345,8 @@ with tab_live:
                 use_container_width=True, hide_index=True,
                 column_config={"Pautan GDACS": st.column_config.LinkColumn()},
             )
+        else:
+            st.info("Tiada peristiwa aktif melibatkan Malaysia dalam GDACS buat masa ini.")
 
         # --- Peta Malaysia: kawasan terkesan ---
         st.subheader("🇲🇾 Peta Malaysia — kawasan terkesan")
@@ -403,67 +383,45 @@ with tab_live:
         elif gdacs_ok:
             st.info("Tiada titik peristiwa melibatkan Malaysia buat masa ini.")
 
-    # --- IFRC: operasi kecemasan antarabangsa ---
+    # --- IFRC: operasi melibatkan Malaysia ---
     st.divider()
-    st.subheader("🟥 IFRC — Operasi kecemasan antarabangsa terkini")
-    try:
-        ifrc = fetch_ifrc()
-        ifrc_ok = True
-    except Exception as e:
-        ifrc_ok = False
-        ifrc_err = e
-    if ifrc_ok and not ifrc.empty:
+    st.subheader("🟥 IFRC — Operasi melibatkan Malaysia")
+    if ifrc_ok and not ifrc_my.empty:
         st.caption(
             f"Ditarik pada {ifrc.attrs['fetched_at'].strftime('%d %b %Y, %H:%M')} — "
-            "Persekutuan Antarabangsa Palang Merah & Bulan Sabit Merah (IFRC), "
-            "operasi kecemasan & rayuan bantuan terkini di seluruh dunia."
+            "Persekutuan Antarabangsa Palang Merah & Bulan Sabit Merah (IFRC)."
         )
         st.dataframe(
-            ifrc.head(15)[["tarikh", "peristiwa", "jenis", "negara", "tahap"]].rename(columns={
+            ifrc_my[["tarikh", "peristiwa", "jenis", "tahap", "url"]].rename(columns={
                 "tarikh": "Tarikh", "peristiwa": "Operasi", "jenis": "Jenis",
-                "negara": "Negara", "tahap": "Tahap",
+                "tahap": "Tahap", "url": "Pautan IFRC GO",
             }),
             use_container_width=True, hide_index=True,
+            column_config={"Pautan IFRC GO": st.column_config.LinkColumn()},
         )
-        ifrc_my = ifrc[ifrc["melibatkan_my"]]
-        if not ifrc_my.empty:
-            st.subheader("⚠️ Operasi IFRC melibatkan Malaysia")
-            st.dataframe(
-                ifrc_my[["tarikh", "peristiwa", "jenis", "tahap", "url"]].rename(columns={
-                    "tarikh": "Tarikh", "peristiwa": "Operasi", "jenis": "Jenis",
-                    "tahap": "Tahap", "url": "Pautan IFRC GO",
-                }),
-                use_container_width=True, hide_index=True,
-                column_config={"Pautan IFRC GO": st.column_config.LinkColumn()},
-            )
     elif ifrc_ok:
-        st.info("Tiada operasi IFRC direkodkan buat masa ini.")
+        st.info("Tiada operasi IFRC melibatkan Malaysia buat masa ini.")
     else:
         st.warning(f"Data IFRC gagal dimuatkan: {ifrc_err}. Paparan lain tidak terjejas.")
 
-    # --- Agensi meteorologi & pengurusan bencana ---
+    # --- Agensi meteorologi & pengurusan bencana Malaysia ---
     st.divider()
-    st.subheader("🏛️ Agensi meteorologi & pengurusan bencana")
+    st.subheader("🏛️ Agensi meteorologi & pengurusan bencana Malaysia")
     st.caption(
-        "Pautan terus ke badan rasmi. Nota jujur: kebanyakan banjir Malaysia "
-        "berskala tempatan dan tidak melepasi ambang amaran global GDACS — "
+        "Pautan terus ke badan rasmi Malaysia. Nota jujur: kebanyakan banjir "
+        "Malaysia berskala tempatan dan tidak melepasi ambang amaran global GDACS — "
         "sebab itu ia tidak muncul dalam peta GDACS di atas. Maklumat banjir "
         "Malaysia yang terperinci ada dalam Flash Update AHA Centre dan "
         "seksyen Berita di bawah."
     )
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**🇲🇾 Malaysia**")
         st.link_button("MET Malaysia — Amaran cuaca", "https://www.met.gov.my/")
         st.link_button("NADMA — Portal Bencana", "https://portalbencana.nadma.gov.my/")
+    with c2:
         st.link_button("JPS — InfoBanjir (aras sungai)", "https://infobanjir.water.gov.my/")
         st.link_button("data.gov.my — Data terbuka", "https://data.gov.my/")
-    with c2:
-        st.markdown("**🌐 Antarabangsa**")
         st.link_button("AHA Centre (ASEAN)", "https://ahacentre.org/")
-        st.link_button("WMO — Pertubuhan Meteorologi Sedunia", "https://wmo.int/")
-        st.link_button("UNDRR — Pengurangan Risiko Bencana PBB", "https://www.undrr.org/")
-        st.link_button("Copernicus EMS (EU)", "https://emergency.copernicus.eu/")
 
     st.markdown("**🟧 AHA Centre — Flash Update berkaitan Malaysia**")
     try:
